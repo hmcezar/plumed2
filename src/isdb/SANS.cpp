@@ -101,12 +101,9 @@ private:
 
   bool                       pbc;
   bool                       serial;
-  // double                     binwidth;
   double                     SL_rank = 0.;
   double                     scale_int = 1.;
-  // unsigned                   grlen;
   std::vector<double>        q_list;
-  // std::vector<double>        gr;
   std::vector<double>        SL_value;
 
   void radial_distribution_hist();
@@ -134,7 +131,6 @@ void SANS::registerKeywords(Keywords& keys) {
   keys.add("numbered","SCATLEN","Use SCATLEN keyword like SCATLEN1, SCATLEN2. These are the scattering lengths for the \\f$i\\f$th atom/bead.");
   keys.add("numbered","EXPINT","Add an experimental value for each q value.");
   keys.add("compulsory","SCALEINT","1.0","SCALING value of the calculated data. Useful to simplify the comparison.");
-  // keys.add("compulsory","BINWIDTH","0.2","BINWIDTH used to compute the pair correlation function. Should be greater than smallest bond length.");
   keys.addOutputComponent("q","default","the # SAXS of q");
   keys.addOutputComponent("exp","EXPINT","the # experimental intensity");
 }
@@ -210,8 +206,6 @@ SANS::SANS(const ActionOptions&ao):
 
   if (exp) scale_int /= expint[0];
 
-  // parse("BINWIDTH",binwidth);
-
   // get the i=j term
   for (unsigned i=0; i<size; i++) {
     SL_rank += SL_value[i]*SL_value[i];
@@ -272,55 +266,6 @@ SANS::SANS(const ActionOptions&ao):
   setDerivatives();
   checkRead();
 }
-
-
-// void SANS::radial_distribution_hist()
-// {
-//   Tensor box = getBox();
-//   Vector diag = box.getRow(0)+box.getRow(1)+box.getRow(2);
-//   double rmax = diag.modulo();
-//   grlen = static_cast<unsigned>(std::floor(rmax/binwidth)+1);
-//   gr.resize(grlen);
-
-//   const unsigned size = getNumberOfAtoms();
-//   const unsigned numq = q_list.size();
-
-//   unsigned stride = comm.Get_size();
-//   unsigned rank   = comm.Get_rank();
-//   if(serial) {
-//     stride = 1;
-//     rank   = 0;
-//   }
-
-//   unsigned nt=OpenMP::getNumThreads();
-//   #pragma omp parallel num_threads(nt)
-//   {
-//     // double loop making histogram of the distance between two atoms/beads summing value of product of SL
-//     std::vector<double> omp_gr(grlen,0.0);
-
-//     #pragma omp for nowait
-//     for (unsigned i=rank; i<size-1; i+=stride){
-//       Vector posi = getPosition(i);
-//       for (unsigned j=i+1; j<size ; j++){
-//         Vector c_distances = delta(posi,getPosition(j));
-//         double m_distances = c_distances.modulo();
-//         unsigned idx = static_cast<unsigned>(std::floor(m_distances/binwidth));
-//         if(nt>1) {
-//           omp_gr[idx] += SL_value[i] * SL_value[j];
-//         } else {
-//           gr[idx] += SL_value[i] * SL_value[j];          
-//         }
-//       }
-//     }
-//     #pragma omp critical
-//     if(nt>1){
-//       for(unsigned i=0; i < grlen; i++) gr[i] += omp_gr[i];
-//     }
-//   }
-  
-//   if(!serial) comm.Sum(&gr[0], grlen);
-// }
-
 
 void SANS::calculate_cpu(std::vector<Vector> &deriv)
 {
@@ -403,8 +348,6 @@ void SANS::calculate()
 
   const size_t size = getNumberOfAtoms();
   const size_t numq = q_list.size();
-
-  // radial_distribution_hist();
 
   std::vector<Vector> deriv(numq*size);
   calculate_cpu(deriv);
