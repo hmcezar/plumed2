@@ -246,16 +246,10 @@ SANS::SANS(const ActionOptions&ao):
     q_list[i]=q_list[i]*10.0;    //factor 10 to convert from A^-1 to nm^-1
   }
   log<<"  Bibliography ";
-  // TODO: change bibliography
-  // if(martini) {
-  //   log<<plumed.cite("Niebling, Björling, Westenhoff, J Appl Crystallogr 47, 1190–1198 (2014).");
-  //   log<<plumed.cite("Paissoni, Jussupow, Camilloni, J Appl Crystallogr 52, 394-402 (2019).");
-  // }
-  // if(atomistic) {
-  //   log<<plumed.cite("Fraser, MacRae, Suzuki, J. Appl. Crystallogr., 11, 693–694 (1978).");
-  //   log<<plumed.cite("Brown, Fox, Maslen, O'Keefe, Willis, International Tables for Crystallography C, 554–595 (International Union of Crystallography, 2006).");
-  // }
-  log<< plumed.cite("Bonomi, Camilloni, Bioinformatics, 33, 3999 (2017)");
+  if(atomistic) {
+    log<<plumed.cite("Sears, Neutron News, 3, 26 (1992)");
+  }
+  log<<plumed.cite("Bonomi, Camilloni, Bioinformatics, 33, 3999 (2017)");
   log<<"\n";
 
   requestAtoms(atoms, false);
