@@ -46,47 +46,53 @@ namespace isdb {
 /*
 Calculates SANS scattered intensity using the Debye equation.
 
-Intensities are calculated for a set of scattering length set using QVALUE keywords that are numbered starting from 0.
-Structure factors can be either assigned using a polynomial expansion to any order using the PARAMETERS keywords;
-automatically assigned to atoms using the ATOMISTIC flag reading a PDB file, a correction for the water density is
-automatically added, with water density that by default is 0.334 but that can be set otherwise using WATERDENS;
-automatically assigned to Martini pseudo atoms using the MARTINI flag.
-The calculated intensities can be scaled using the SCALEINT keywords. This is applied by rescaling the structure factors.
+Intensities are calculated for a set of scattering vectors set using QVALUE keywords that are numbered starting from 0.
+Scattering lengths can be assigned for each atom/bead using the SCATLEN keywords.
+The scattering lengths are automatically assigned to atoms using the ATOMISTIC flag reading the species from a PDB file.
+For MARTINI models the user has to assign the scattering lengths using the SCATLEN keywords.
+The output intensities are I(q)/I(q0), with q0 being the lowest scattering vector.
+The intensities can be scaled using the SCALEINT keywords.
 Experimental reference intensities can be added using the EXPINT keywords.
-By default SAXS is calculated using Debye on CPU, by adding the GPU flag it is possible to solve the equation on a GPU
-if the ARRAYFIRE libraries are installed and correctly linked.
+If the experimental intensities are provided, the output I(q) is automatically scaled so the calculated and experimental I(q0) match.
 \ref METAINFERENCE can be activated using DOSCORE and the other relevant keywords.
 
 \par Examples
-in the following example the saxs intensities for a martini model are calculated. structure factors
-are obtained from the pdb file indicated in the MOLINFO.
+in the following example the sans intensities for a martini model are calculated. scattering lengths
+are obtained from the SCATLEN keywords.
 
 \plumedfile
 MOLINFO STRUCTURE=template.pdb
 
-SAXS ...
-LABEL=saxs
-ATOMS=1-355
-SCALEINT=3920000
-MARTINI
-QVALUE1=0.02 EXPINT1=1.0902
-QVALUE2=0.05 EXPINT2=0.790632
-QVALUE3=0.08 EXPINT3=0.453808
-QVALUE4=0.11 EXPINT4=0.254737
-QVALUE5=0.14 EXPINT5=0.154928
-QVALUE6=0.17 EXPINT6=0.0921503
-QVALUE7=0.2 EXPINT7=0.052633
-QVALUE8=0.23 EXPINT8=0.0276557
-QVALUE9=0.26 EXPINT9=0.0122775
-QVALUE10=0.29 EXPINT10=0.00880634
-QVALUE11=0.32 EXPINT11=0.0137301
-QVALUE12=0.35 EXPINT12=0.0180036
-QVALUE13=0.38 EXPINT13=0.0193374
-QVALUE14=0.41 EXPINT14=0.0210131
-QVALUE15=0.44 EXPINT15=0.0220506
-... SAXS
+SANS ...
+  LABEL=sans
+  ATOMS=1-5
 
-PRINT ARG=(saxs\.q-.*),(saxs\.exp-.*) FILE=colvar STRIDE=1
+  MARTINI
+  SCATLEN1=109.3554
+  SCATLEN2=48.3351
+  SCATLEN3=79.9724
+  SCATLEN4=79.9724
+  SCATLEN5=86.6434
+
+  QVALUE1=0.011011 EXPINT1=0.56778
+  QVALUE2=0.013054 EXPINT2=0.48948
+  QVALUE3=0.016927 EXPINT3=0.5384
+  QVALUE4=0.019104 EXPINT4=0.57098
+  QVALUE5=0.020989 EXPINT5=0.63774
+  QVALUE6=0.031085 EXPINT6=0.57009
+  QVALUE7=0.040975 EXPINT7=0.54487
+  QVALUE8=0.050954 EXPINT8=0.47315
+  QVALUE9=0.060951 EXPINT9=0.39894
+  QVALUE10=0.08093 EXPINT10=0.29655
+  QVALUE11=0.09106 EXPINT11=0.26337
+  QVALUE12=0.10079 EXPINT12=0.21249
+  QVALUE13=0.11089 EXPINT13=0.16159
+  QVALUE14=0.12037 EXPINT14=0.1333
+  QVALUE15=0.13027 EXPINT15=0.09556
+
+... SANS
+
+PRINT ARG=(sans\.q-.*),(sans\.exp-.*) FILE=colvar STRIDE=1
 
 \endplumedfile
 
@@ -127,11 +133,11 @@ void SANS::registerKeywords(Keywords& keys) {
   keys.addFlag("ATOMISTIC",false,"calculate SANS for an atomistic model");
   keys.addFlag("MARTINI",false,"calculate SANS for a Martini model");
   keys.add("atoms","ATOMS","The atoms to be included in the calculation, e.g. the whole protein.");
-  keys.add("numbered","QVALUE","Selected scattering lengths in Angstrom are given as QVALUE1, QVALUE2, ... .");
+  keys.add("numbered","QVALUE","Selected scattering vector in Angstrom are given as QVALUE1, QVALUE2, ... .");
   keys.add("numbered","SCATLEN","Use SCATLEN keyword like SCATLEN1, SCATLEN2. These are the scattering lengths for the \\f$i\\f$th atom/bead.");
   keys.add("numbered","EXPINT","Add an experimental value for each q value.");
   keys.add("compulsory","SCALEINT","1.0","SCALING value of the calculated data. Useful to simplify the comparison.");
-  keys.addOutputComponent("q","default","the # SAXS of q");
+  keys.addOutputComponent("q","default","the # SANS of q");
   keys.addOutputComponent("exp","EXPINT","the # experimental intensity");
 }
 
