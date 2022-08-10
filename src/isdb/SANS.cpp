@@ -20,8 +20,10 @@
    along with plumed.  If not, see <http://www.gnu.org/licenses/>.
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 /*
- This class was originally written by Henrique Musseli Cezar
- and is based on the SAXS class.
+ This class was originally written by Henrique Musseli Cezar,
+ and is heavily based on the SAXS class. In fact it's basically
+ the SAXS class that reads PARAMETERS with a single value instead
+ of polynomial coeffs and with a different normalization. 
 */
 
 #include "MetainferenceBase.h"
