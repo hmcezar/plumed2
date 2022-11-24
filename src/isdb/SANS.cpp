@@ -34,10 +34,15 @@
 #include "tools/Pbc.h"
 
 #include <map>
+#include <cmath>
+#include <iostream>
 
 #ifndef M_PI
 #define M_PI           3.14159265358979323846
 #endif
+
+// Splines algo https://stackoverflow.com/a/19216702/3254658
+// good explanation on BC https://timodenk.com/blog/cubic-spline-interpolation/
 
 namespace PLMD {
 namespace isdb {
@@ -105,17 +110,31 @@ class SANS :
 private:
   enum { H, D, C, N, O, P, S, NTT };
 
+  struct SplineCoeffs{
+    double a;
+    double b;
+    double c;
+    double d;
+    double x;
+  };
+
   bool                       pbc;
   bool                       serial;
+  bool                       resolution;
   double                     SL_rank = 0.;
   double                     scale_int = 1.;
+  int                        Nj = 10;
   std::vector<double>        q_list;
   std::vector<double>        SL_value;
+  std::vector<double>        qj_list;
+  std::vector<double>        sigma_res;
 
   void radial_distribution_hist();
   void calculate_cpu(std::vector<Vector> &deriv);
   void tableASL(const std::vector<AtomNumber> &atoms, std::vector<double> &SL_value);
-
+  std::vector<SplineCoeffs> spline_coeffs(std::vector<double> &x, std::vector<double> &y);
+  std::vector<double> interpolation(std::vector<SplineCoeffs> &coeffs, std::vector<double> &q_list, std::vector<double> &x);
+  inline double spline(SplineCoeffs &coeffs, double &x);  
 public:
   static void registerKeywords( Keywords& keys );
   explicit SANS(const ActionOptions&);
@@ -136,7 +155,9 @@ void SANS::registerKeywords(Keywords& keys) {
   keys.add("numbered","QVALUE","Selected scattering vector in Angstrom are given as QVALUE1, QVALUE2, ... .");
   keys.add("numbered","SCATLEN","Use SCATLEN keyword like SCATLEN1, SCATLEN2. These are the scattering lengths for the \\f$i\\f$th atom/bead.");
   keys.add("numbered","EXPINT","Add an experimental value for each q value.");
+  keys.add("numbered","SIGMARES","Variance of Gaussian distribution describing the deviation in the scattering angle for each q value.");
   keys.add("compulsory","SCALEINT","1.0","SCALING value of the calculated data. Useful to simplify the comparison.");
+  keys.add("compulsory","N","10","Number of points in the resolution function integral.");
   keys.addOutputComponent("q","default","the # SANS of q");
   keys.addOutputComponent("exp","EXPINT","the # experimental intensity");
 }
@@ -196,6 +217,7 @@ SANS::SANS(const ActionOptions&ao):
     tableASL(atoms, SL_value);
   }
 
+  // read experimental intensities
   std::vector<double> expint;
   expint.resize( numq );
   ntarget=0;
@@ -208,6 +230,18 @@ SANS::SANS(const ActionOptions&ao):
   if(ntarget==numq) exp=true;
   if(getDoScore()&&!exp) error("with DOSCORE you need to set the EXPINT values");
 
+  // read sigma_res
+  sigma_res.resize( numq );
+  resolution=false;
+  ntarget=0;
+  for(unsigned i=0; i<numq; ++i) {
+    if( !parseNumbered( "SIGMARES", i+1, sigma_res[i] ) ) break;
+    ntarget++;
+  }
+  if(ntarget!=numq && ntarget!=0) error("found wrong number of SIGMARES values");
+  if(ntarget==numq) resolution=true;
+
+  parse("N", Nj);
   parse("SCALEINT", scale_int);
 
   if (exp) scale_int /= expint[0];
@@ -256,7 +290,7 @@ SANS::SANS(const ActionOptions&ao):
     log<<plumed.cite("Sears, Neutron News, 3, 26 (1992)");
   }
   log<<plumed.cite("Bonomi, Camilloni, Bioinformatics, 33, 3999 (2017)");
-  log<<"\n";
+  log<<"\n"; // TODO: add references for resolution function
 
   requestAtoms(atoms, false);
   if(getDoScore()) {
@@ -303,8 +337,8 @@ void SANS::calculate_cpu(std::vector<Vector> &deriv)
           double tmp = FSL*(tcq-tsq);
           Vector dd  = c_distances*tmp;
           if(nt>1) {
-            omp_deriv[kdx+i] -=dd;
-            omp_deriv[kdx+j] +=dd;
+            omp_deriv[kdx+i] -= dd;
+            omp_deriv[kdx+j] += dd;
             omp_sum[k]       += FSL*tsq;
           } else {
             deriv[kdx+i] -= dd;
@@ -333,6 +367,26 @@ void SANS::calculate_cpu(std::vector<Vector> &deriv)
   double normfactor = sum[0]*scale_int;
   for (unsigned i=0; i<deriv.size(); i++) deriv[i] = deriv[i]/normfactor;
   for (unsigned k=0; k<numq; k++) sum[k] /= normfactor;
+  
+  // TODO: implement resolution correction
+  if (resolution) {
+    // get spline for scatering curve
+    std::vector<SplineCoeffs> scatt_coeffs = spline_coeffs(q_list, sum);
+
+    // artificially populate qj_list for debugging
+    // qj_list.resize(100);
+    // double dq = (q_list[q_list.size()-1] - q_list[0])/100;
+    // for (unsigned i=0; i<100; i++) {
+    //   qj_list[i] = q_list[0] + i*dq;
+    // }
+    std::vector<double> scatt_curve = interpolation(scatt_coeffs, q_list, qj_list);
+
+    // for (unsigned i=0; i<qj_list.size(); i++) {
+    //   std::cout << qj_list[i] << " " << scatt_curve[i] << std::endl;
+    // }
+    // get spline for the derivatives
+
+  }
 
   for (unsigned k=0; k<numq; k++) {
     std::string num; Tools::convert(k,num);
@@ -384,6 +438,96 @@ void SANS::update() {
   // write status file
   if(getWstride()>0&& (getStep()%getWstride()==0 || getCPT()) ) writeStatus();
 }
+
+// compute resolution function
+std::vector<Vector> resolution_function()
+{
+    int numq = q_list.size()
+    std::vector<double> R(numq, Nj);
+
+    for (unsigned i=0; i<numq; i++) {
+      dq = 6*sigma_res[i]/Nj;
+      for (unsigned j=0; j<Nj; j++) {
+        std::vector<double> qj_list(Nj);
+      }
+    }
+    // compute Bessel's function with Tools::bessel0(arg)
+}
+
+std::vector<double> SANS::interpolation(std::vector<SplineCoeffs> &coeffs, std::vector<double> &x)
+{
+  std::vector<double> curve(x.size());
+
+  unsigned s = 0;
+  for (unsigned i=0; i<x.size(); i++) {
+    if ((x[i] >= q_list[s+1]) && (s+1 < q_list.size()-1)) s++;
+    curve[i] = spline(coeffs[s], x[i]);
+  }
+
+  return curve;
+}
+
+inline double SANS::spline(SplineCoeffs &coeffs, double &x)
+{
+  double dx = x - coeffs.x;
+  return coeffs.a + coeffs.b*dx + coeffs.c*dx*dx + coeffs.d*dx*dx*dx;
+}
+
+// natural bc cubic spline implementation from the Wikipedia algorithm
+// modified from https://stackoverflow.com/a/19216702/3254658
+std::vector<SANS::SplineCoeffs> SANS::spline_coeffs(std::vector<double> &x, std::vector<double> &y)
+{
+  unsigned n = x.size()-1;
+  std::vector<double> a;
+  a.insert(a.begin(), y.begin(), y.end());
+  std::vector<double> b(n);
+  std::vector<double> d(n);
+  std::vector<double> h;
+
+  for(unsigned i=0; i<n; i++)
+    h.push_back(x[i+1]-x[i]);
+
+  std::vector<double> alpha;
+  alpha.push_back(0);
+  for(unsigned i=1; i<n; i++)
+    alpha.push_back( 3*(a[i+1]-a[i])/h[i] - 3*(a[i]-a[i-1])/h[i-1]  );
+
+  std::vector<double> c(n+1);
+  std::vector<double> l(n+1);
+  std::vector<double> mu(n+1);
+  std::vector<double> z(n+1);
+  l[0] = 1;
+  mu[0] = 0;
+  z[0] = 0;
+
+  for(unsigned i=1; i<n; i++) {
+    l[i] = 2 *(x[i+1]-x[i-1])-h[i-1]*mu[i-1];
+    mu[i] = h[i]/l[i];
+    z[i] = (alpha[i]-h[i-1]*z[i-1])/l[i];
+  }
+
+  l[n] = 1;
+  z[n] = 0;
+  c[n] = 0;
+
+  for(int j=n-1; j>=0; j--) {
+    c[j] = z[j] - mu[j] * c[j+1];
+    b[j] = (a[j+1]-a[j])/h[j]-h[j]*(c[j+1]+2*c[j])/3;
+    d[j] = (c[j+1]-c[j])/3/h[j];
+  }
+
+  std::vector<SplineCoeffs> output_set(n);
+  for(unsigned i=0; i<n; i++) {
+    output_set[i].a = a[i];
+    output_set[i].b = b[i];
+    output_set[i].c = c[i];
+    output_set[i].d = d[i];
+    output_set[i].x = x[i];
+  }
+
+  return output_set;
+}
+
 
 void SANS::tableASL(const std::vector<AtomNumber> &atoms, std::vector<double> &SL_value)
 {
