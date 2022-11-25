@@ -118,23 +118,24 @@ private:
     double x;
   };
 
-  bool                       pbc;
-  bool                       serial;
-  bool                       resolution;
-  double                     SL_rank = 0.;
-  double                     scale_int = 1.;
-  int                        Nj = 10;
-  std::vector<double>        q_list;
-  std::vector<double>        SL_value;
-  std::vector<double>        qj_list;
-  std::vector<double>        sigma_res;
+  bool                             pbc;
+  bool                             serial;
+  bool                             resolution;
+  double                           SL_rank = 0.;
+  double                           scale_int = 1.;
+  int                              Nj = 10;
+  std::vector<double>              q_list;
+  std::vector<double>              SL_value;
+  std::vector<std::vector<double>> qj_list;
+  std::vector<std::vector<double>> Rij;
+  std::vector<double>              sigma_res;
 
   void radial_distribution_hist();
   void calculate_cpu(std::vector<Vector> &deriv);
   void tableASL(const std::vector<AtomNumber> &atoms, std::vector<double> &SL_value);
   std::vector<SplineCoeffs> spline_coeffs(std::vector<double> &x, std::vector<double> &y);
-  std::vector<double> interpolation(std::vector<SplineCoeffs> &coeffs, std::vector<double> &q_list, std::vector<double> &x);
-  inline double spline(SplineCoeffs &coeffs, double &x);  
+  inline double interpolation(std::vector<SplineCoeffs> &coeffs, double x);
+  void resolution_function(); 
 public:
   static void registerKeywords( Keywords& keys );
   explicit SANS(const ActionOptions&);
@@ -244,6 +245,11 @@ SANS::SANS(const ActionOptions&ao):
   parse("N", Nj);
   parse("SCALEINT", scale_int);
 
+  if (resolution) {
+    qj_list.resize(numq, std::vector<double>(Nj));
+    Rij.resize(numq, std::vector<double>(Nj));
+  }
+
   if (exp) scale_int /= expint[0];
 
   // get the i=j term
@@ -284,6 +290,7 @@ SANS::SANS(const ActionOptions&ao):
   // convert units to nm^-1
   for(unsigned i=0; i<numq; ++i) {
     q_list[i]=q_list[i]*10.0;    //factor 10 to convert from A^-1 to nm^-1
+    if (resolution) sigma_res[i]=sigma_res[i]*10.0;
   }
   log<<"  Bibliography ";
   if(atomistic) {
@@ -372,19 +379,44 @@ void SANS::calculate_cpu(std::vector<Vector> &deriv)
   if (resolution) {
     // get spline for scatering curve
     std::vector<SplineCoeffs> scatt_coeffs = spline_coeffs(q_list, sum);
-
-    // artificially populate qj_list for debugging
-    // qj_list.resize(100);
+    // see how the spline curve looks
+    // std::vector<double> curve(100);
+    // std::vector<double> qs(100);
     // double dq = (q_list[q_list.size()-1] - q_list[0])/100;
     // for (unsigned i=0; i<100; i++) {
-    //   qj_list[i] = q_list[0] + i*dq;
+    //   qs[i] = q_list[0] + i*dq;
+    //   curve[i] = interpolation(scatt_coeffs, qs[i]);
     // }
-    std::vector<double> scatt_curve = interpolation(scatt_coeffs, q_list, qj_list);
+    // for (unsigned i=0; i<qs.size(); i++) {
+    //   std::cout << qs[i] << " " << curve[i] << std::endl;
+    // }
 
-    // for (unsigned i=0; i<qj_list.size(); i++) {
-    //   std::cout << qj_list[i] << " " << scatt_curve[i] << std::endl;
+    // compute Rij and qj_list
+    resolution_function();
+    // for (unsigned j=0; j<qj_list[19].size(); j++) {
+    //   std::cout << qj_list[19][j] << " " << Rij[19][j] << std::endl;
     // }
+
     // get spline for the derivatives
+    std::vector<SplineCoeffs> deriv_coeffs_x(size);
+    std::vector<SplineCoeffs> deriv_coeffs_y(size);
+    std::vector<SplineCoeffs> deriv_coeffs_z(size);
+    // TODO: MPI parallelize this
+    for (unsigned i; i < size; i++) {
+      std::vector<double> deriv_i_x(numq);
+      std::vector<double> deriv_i_y(numq);
+      std::vector<double> deriv_i_z(numq);
+      for (unsigned k; k < numq; k++) {
+        unsigned kdx = k*size;
+        deriv_i_x[k] = deriv[kdx+i][0];
+        deriv_i_y[k] = deriv[kdx+i][1];
+        deriv_i_z[k] = deriv[kdx+i][2];
+      }
+      deriv_coeffs_x[i] = spline_coeffs(q_list, deriv_i_x)
+      deriv_coeffs_y[i] = spline_coeffs(q_list, deriv_i_y)
+      deriv_coeffs_z[i] = spline_coeffs(q_list, deriv_i_z)
+    }
+    // do these splines actually interpolate the function??
 
   }
 
@@ -440,37 +472,35 @@ void SANS::update() {
 }
 
 // compute resolution function
-std::vector<Vector> resolution_function()
+void SANS::resolution_function()
 {
-    int numq = q_list.size()
-    std::vector<double> R(numq, Nj);
+  int numq = q_list.size();
 
-    for (unsigned i=0; i<numq; i++) {
-      dq = 6*sigma_res[i]/Nj;
-      for (unsigned j=0; j<Nj; j++) {
-        std::vector<double> qj_list(Nj);
-      }
+  // only OpenMP because numq might be smaller than the number of ranks
+  unsigned nt=OpenMP::getNumThreads();
+  #pragma omp parallel for num_threads(nt)
+  for (unsigned i=0; i<numq; i++) {
+    double qi = q_list[i];
+    double dq = 6*sigma_res[i]/(Nj-1);
+    double sigma_sq = sigma_res[i]*sigma_res[i];
+    double qstart = qi - 3*sigma_res[i];
+    for (unsigned j=0; j<Nj; j++) {
+      double qj = qstart + j*dq;
+      double I0 = Tools::bessel0(qj*qi/sigma_sq);
+
+      qj_list[i][j] = qj;
+      Rij[i][j] = (qj/sigma_sq)*std::exp(-0.5*(qj*qj + qi*qi)/sigma_sq)*I0;
     }
-    // compute Bessel's function with Tools::bessel0(arg)
-}
-
-std::vector<double> SANS::interpolation(std::vector<SplineCoeffs> &coeffs, std::vector<double> &x)
-{
-  std::vector<double> curve(x.size());
-
-  unsigned s = 0;
-  for (unsigned i=0; i<x.size(); i++) {
-    if ((x[i] >= q_list[s+1]) && (s+1 < q_list.size()-1)) s++;
-    curve[i] = spline(coeffs[s], x[i]);
   }
-
-  return curve;
 }
 
-inline double SANS::spline(SplineCoeffs &coeffs, double &x)
+inline double SANS::interpolation(std::vector<SplineCoeffs> &coeffs, double x)
 {
-  double dx = x - coeffs.x;
-  return coeffs.a + coeffs.b*dx + coeffs.c*dx*dx + coeffs.d*dx*dx*dx;
+  unsigned s = 0;
+  while ((x >= q_list[s+1]) && (s+1 < q_list.size()-1)) s++;
+
+  double dx = x - coeffs[s].x;
+  return coeffs[s].a + coeffs[s].b*dx + coeffs[s].c*dx*dx + coeffs[s].d*dx*dx*dx;
 }
 
 // natural bc cubic spline implementation from the Wikipedia algorithm
