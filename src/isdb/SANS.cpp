@@ -36,6 +36,7 @@
 #include <map>
 #include <cmath>
 #include <iostream>
+#include <fstream>
 
 #ifndef M_PI
 #define M_PI           3.14159265358979323846
@@ -245,11 +246,6 @@ SANS::SANS(const ActionOptions&ao):
   parse("N", Nj);
   parse("SCALEINT", scale_int);
 
-  if (resolution) {
-    qj_list.resize(numq, std::vector<double>(Nj));
-    Rij.resize(numq, std::vector<double>(Nj));
-  }
-
   if (exp) scale_int /= expint[0];
 
   // get the i=j term
@@ -292,6 +288,21 @@ SANS::SANS(const ActionOptions&ao):
     q_list[i]=q_list[i]*10.0;    //factor 10 to convert from A^-1 to nm^-1
     if (resolution) sigma_res[i]=sigma_res[i]*10.0;
   }
+
+  // compute resolution function after converting units
+  if (resolution) {
+    qj_list.resize(numq, std::vector<double>(Nj));
+    Rij.resize(numq, std::vector<double>(Nj));
+    // compute Rij and qj_list
+    resolution_function();
+    // std::ofstream resfunc;
+    // resfunc.open("resfunc.dat");
+    // for (unsigned j=0; j<qj_list[5].size(); j++) {
+    //  resfunc << qj_list[5][j] << " " << Rij[5][j] << std::endl;
+    // }
+    // resfunc.close();
+  }
+
   log<<"  Bibliography ";
   if(atomistic) {
     log<<plumed.cite("Sears, Neutron News, 3, 26 (1992)");
@@ -391,33 +402,82 @@ void SANS::calculate_cpu(std::vector<Vector> &deriv)
     //   std::cout << qs[i] << " " << curve[i] << std::endl;
     // }
 
-    // compute Rij and qj_list
-    resolution_function();
-    // for (unsigned j=0; j<qj_list[19].size(); j++) {
-    //   std::cout << qj_list[19][j] << " " << Rij[19][j] << std::endl;
-    // }
-
     // get spline for the derivatives
-    std::vector<SplineCoeffs> deriv_coeffs_x(size);
-    std::vector<SplineCoeffs> deriv_coeffs_y(size);
-    std::vector<SplineCoeffs> deriv_coeffs_z(size);
-    // TODO: MPI parallelize this
-    for (unsigned i; i < size; i++) {
+    std::vector<std::vector<SplineCoeffs>> deriv_coeffs_x(size);
+    std::vector<std::vector<SplineCoeffs>> deriv_coeffs_y(size);
+    std::vector<std::vector<SplineCoeffs>> deriv_coeffs_z(size);
+    unsigned nt=OpenMP::getNumThreads();
+
+    // TODO: maybe just to this if metainference is being used
+    // TODO: MPI parallelize this: to Allgather I need to split the atoms between the ranks properly; size/stride
+    // for (unsigned i=rank; i<size; i+=stride) {
+    for (unsigned i=0; i<size; i++) {
       std::vector<double> deriv_i_x(numq);
       std::vector<double> deriv_i_y(numq);
       std::vector<double> deriv_i_z(numq);
-      for (unsigned k; k < numq; k++) {
+      for (unsigned k=0; k<numq; k++) {
         unsigned kdx = k*size;
         deriv_i_x[k] = deriv[kdx+i][0];
         deriv_i_y[k] = deriv[kdx+i][1];
         deriv_i_z[k] = deriv[kdx+i][2];
       }
-      deriv_coeffs_x[i] = spline_coeffs(q_list, deriv_i_x)
-      deriv_coeffs_y[i] = spline_coeffs(q_list, deriv_i_y)
-      deriv_coeffs_z[i] = spline_coeffs(q_list, deriv_i_z)
+      deriv_coeffs_x[i] = spline_coeffs(q_list, deriv_i_x);
+      deriv_coeffs_y[i] = spline_coeffs(q_list, deriv_i_y);
+      deriv_coeffs_z[i] = spline_coeffs(q_list, deriv_i_z);
+
+      // compute derivative with the smearing using the resolution function
+      #pragma omp parallel for num_threads(nt)
+      for (unsigned k=0; k<numq; k++) {
+        unsigned kdx = k*size;
+        double dq = qj_list[k][1] - qj_list[k][0];
+        deriv[kdx+i][0] = 0.;
+        deriv[kdx+i][1] = 0.;
+        deriv[kdx+i][2] = 0.;
+        for (unsigned j=0; j<Nj; j++) {
+          deriv[kdx+i][0] += Rij[k][j] * interpolation(deriv_coeffs_x[i], qj_list[k][j]) * dq;
+          deriv[kdx+i][1] += Rij[k][j] * interpolation(deriv_coeffs_y[i], qj_list[k][j]) * dq;
+          deriv[kdx+i][2] += Rij[k][j] * interpolation(deriv_coeffs_z[i], qj_list[k][j]) * dq;
+        }
+      }
     }
     // do these splines actually interpolate the function??
+    // see how the spline curve looks
+    // std::ofstream points;
+    // std::ofstream interp;
+    // points.open("pontos.dat");
+    // interp.open("interpolado.dat");
+    // std::vector<double> curvex(100);
+    // std::vector<double> curvey(100);
+    // std::vector<double> curvez(100);
+    // std::vector<double> qs(100);
+    // double dq = (q_list[q_list.size()-1] - q_list[0])/100;
+    // for (unsigned i=0; i<100; i++) {
+    //   qs[i] = q_list[0] + i*dq;
+    //   curvex[i] = interpolation(deriv_coeffs_x[0], qs[i]);
+    //   curvey[i] = interpolation(deriv_coeffs_y[0], qs[i]);
+    //   curvez[i] = interpolation(deriv_coeffs_z[0], qs[i]);
+    // }
+    // actual curves
+    // for (unsigned k=0; k < numq; k++) {
+    //   unsigned kdx = k*size;
+    //   points << q_list[k] << " " << deriv[kdx+0][0] << " " << deriv[kdx+0][1] << " " << deriv[kdx+0][2] << std::endl;
+    // }
+    // interpolated
+    // for (unsigned i=0; i<qs.size(); i++) {
+    //   interp << qs[i] << " " << curvex[i] << " " << curvey[i] << " " << curvez[i] << std::endl;
+    // }
+    // points.close();
+    // interp.close();
 
+    // compute the smeared spectra using the resolution function
+    #pragma omp parallel for num_threads(nt)
+    for (unsigned i=0; i<numq; i++) {
+      sum[i] = 0.;
+      double dq = qj_list[i][1] - qj_list[i][0];
+      for (unsigned j=0; j<Nj; j++) {
+        sum[i] += Rij[i][j] * interpolation(scatt_coeffs, qj_list[i][j]) * dq;
+      }
+    }
   }
 
   for (unsigned k=0; k<numq; k++) {
