@@ -402,44 +402,62 @@ void SANS::calculate_cpu(std::vector<Vector> &deriv)
     //   std::cout << qs[i] << " " << curve[i] << std::endl;
     // }
 
+    // compute the work distribution
+    //unsigned int remainder = size % stride;
+    //std::vector<int> local_counts(stride);
+    //std::vector<int> offsets(stride);
+    //unsigned int sum = 0;
+    //for (unsigned int i = 0; i < stride; i++) {
+    //    local_counts[i] = size / stride;
+    //    if (remainder > 0) {
+    //        local_counts[i] += 1;
+    //        remainder--;
+    //    }
+    //    offsets[i] = sum;
+    //    sum += local_counts[i];
+    //}
+
     // get spline for the derivatives
-    std::vector<std::vector<SplineCoeffs>> deriv_coeffs_x(size);
-    std::vector<std::vector<SplineCoeffs>> deriv_coeffs_y(size);
-    std::vector<std::vector<SplineCoeffs>> deriv_coeffs_z(size);
     unsigned nt=OpenMP::getNumThreads();
 
-    // TODO: maybe just to this if metainference is being used
-    // TODO: MPI parallelize this: to Allgather I need to split the atoms between the ranks properly; size/stride
-    // for (unsigned i=rank; i<size; i+=stride) {
-    for (unsigned i=0; i<size; i++) {
+    // copy the deriv to a new vector and zero deriv
+    std::vector<Vector> old_deriv(deriv);
+    memset(&deriv[0][0], 0.0, deriv.size() * sizeof deriv[0]);
+
+    for (unsigned i=rank; i<size; i+=stride) {
       std::vector<double> deriv_i_x(numq);
       std::vector<double> deriv_i_y(numq);
       std::vector<double> deriv_i_z(numq);
+
+      std::vector<SplineCoeffs> deriv_coeffs_x;
+      std::vector<SplineCoeffs> deriv_coeffs_y;
+      std::vector<SplineCoeffs> deriv_coeffs_z;
       for (unsigned k=0; k<numq; k++) {
         unsigned kdx = k*size;
-        deriv_i_x[k] = deriv[kdx+i][0];
-        deriv_i_y[k] = deriv[kdx+i][1];
-        deriv_i_z[k] = deriv[kdx+i][2];
+        deriv_i_x[k] = old_deriv[kdx+i][0];
+        deriv_i_y[k] = old_deriv[kdx+i][1];
+        deriv_i_z[k] = old_deriv[kdx+i][2];
       }
-      deriv_coeffs_x[i] = spline_coeffs(q_list, deriv_i_x);
-      deriv_coeffs_y[i] = spline_coeffs(q_list, deriv_i_y);
-      deriv_coeffs_z[i] = spline_coeffs(q_list, deriv_i_z);
+      deriv_coeffs_x = spline_coeffs(q_list, deriv_i_x);
+      deriv_coeffs_y = spline_coeffs(q_list, deriv_i_y);
+      deriv_coeffs_z = spline_coeffs(q_list, deriv_i_z);
 
       // compute derivative with the smearing using the resolution function
       #pragma omp parallel for num_threads(nt)
       for (unsigned k=0; k<numq; k++) {
         unsigned kdx = k*size;
         double dq = qj_list[k][1] - qj_list[k][0];
-        deriv[kdx+i][0] = 0.;
-        deriv[kdx+i][1] = 0.;
-        deriv[kdx+i][2] = 0.;
         for (unsigned j=0; j<Nj; j++) {
-          deriv[kdx+i][0] += Rij[k][j] * interpolation(deriv_coeffs_x[i], qj_list[k][j]) * dq;
-          deriv[kdx+i][1] += Rij[k][j] * interpolation(deriv_coeffs_y[i], qj_list[k][j]) * dq;
-          deriv[kdx+i][2] += Rij[k][j] * interpolation(deriv_coeffs_z[i], qj_list[k][j]) * dq;
+          deriv[kdx+i][0] += Rij[k][j] * interpolation(deriv_coeffs_x, qj_list[k][j]) * dq;
+          deriv[kdx+i][1] += Rij[k][j] * interpolation(deriv_coeffs_y, qj_list[k][j]) * dq;
+          deriv[kdx+i][2] += Rij[k][j] * interpolation(deriv_coeffs_z, qj_list[k][j]) * dq;
         }
       }
     }
+    if(!serial) {
+      comm.Sum(&deriv[0][0], 3*deriv.size());
+    }
+
     // do these splines actually interpolate the function??
     // see how the spline curve looks
     // std::ofstream points;
@@ -453,16 +471,16 @@ void SANS::calculate_cpu(std::vector<Vector> &deriv)
     // double dq = (q_list[q_list.size()-1] - q_list[0])/100;
     // for (unsigned i=0; i<100; i++) {
     //   qs[i] = q_list[0] + i*dq;
-    //   curvex[i] = interpolation(deriv_coeffs_x[0], qs[i]);
-    //   curvey[i] = interpolation(deriv_coeffs_y[0], qs[i]);
-    //   curvez[i] = interpolation(deriv_coeffs_z[0], qs[i]);
+    //   curvex[i] = interpolation(deriv_coeffs_x[993], qs[i]);
+    //   curvey[i] = interpolation(deriv_coeffs_y[993], qs[i]);
+    //   curvez[i] = interpolation(deriv_coeffs_z[993], qs[i]);
     // }
-    // actual curves
+    // // actual curves
     // for (unsigned k=0; k < numq; k++) {
     //   unsigned kdx = k*size;
-    //   points << q_list[k] << " " << deriv[kdx+0][0] << " " << deriv[kdx+0][1] << " " << deriv[kdx+0][2] << std::endl;
+    //   points << q_list[k] << " " << deriv[kdx+993][0] << " " << deriv[kdx+993][1] << " " << deriv[kdx+993][2] << std::endl;
     // }
-    // interpolated
+    // // interpolated
     // for (unsigned i=0; i<qs.size(); i++) {
     //   interp << qs[i] << " " << curvex[i] << " " << curvey[i] << " " << curvez[i] << std::endl;
     // }
