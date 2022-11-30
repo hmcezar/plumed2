@@ -285,7 +285,7 @@ SANS::SANS(const ActionOptions&ao):
 
   // convert units to nm^-1
   for(unsigned i=0; i<numq; ++i) {
-    q_list[i]=q_list[i]*10.0;    //factor 10 to convert from A^-1 to nm^-1
+    q_list[i]=q_list[i]*10.0;    // factor 10 to convert from A^-1 to nm^-1
     if (resolution) sigma_res[i]=sigma_res[i]*10.0;
   }
 
@@ -295,12 +295,6 @@ SANS::SANS(const ActionOptions&ao):
     Rij.resize(numq, std::vector<double>(Nj));
     // compute Rij and qj_list
     resolution_function();
-    // std::ofstream resfunc;
-    // resfunc.open("resfunc.dat");
-    // for (unsigned j=0; j<qj_list[5].size(); j++) {
-    //  resfunc << qj_list[5][j] << " " << Rij[5][j] << std::endl;
-    // }
-    // resfunc.close();
   }
 
   log<<"  Bibliography ";
@@ -386,44 +380,16 @@ void SANS::calculate_cpu(std::vector<Vector> &deriv)
   for (unsigned i=0; i<deriv.size(); i++) deriv[i] = deriv[i]/normfactor;
   for (unsigned k=0; k<numq; k++) sum[k] /= normfactor;
   
-  // TODO: implement resolution correction
   if (resolution) {
     // get spline for scatering curve
     std::vector<SplineCoeffs> scatt_coeffs = spline_coeffs(q_list, sum);
-    // see how the spline curve looks
-    // std::vector<double> curve(100);
-    // std::vector<double> qs(100);
-    // double dq = (q_list[q_list.size()-1] - q_list[0])/100;
-    // for (unsigned i=0; i<100; i++) {
-    //   qs[i] = q_list[0] + i*dq;
-    //   curve[i] = interpolation(scatt_coeffs, qs[i]);
-    // }
-    // for (unsigned i=0; i<qs.size(); i++) {
-    //   std::cout << qs[i] << " " << curve[i] << std::endl;
-    // }
-
-    // compute the work distribution
-    //unsigned int remainder = size % stride;
-    //std::vector<int> local_counts(stride);
-    //std::vector<int> offsets(stride);
-    //unsigned int sum = 0;
-    //for (unsigned int i = 0; i < stride; i++) {
-    //    local_counts[i] = size / stride;
-    //    if (remainder > 0) {
-    //        local_counts[i] += 1;
-    //        remainder--;
-    //    }
-    //    offsets[i] = sum;
-    //    sum += local_counts[i];
-    //}
 
     // get spline for the derivatives
-    unsigned nt=OpenMP::getNumThreads();
-
     // copy the deriv to a new vector and zero deriv
     std::vector<Vector> old_deriv(deriv);
     memset(&deriv[0][0], 0.0, deriv.size() * sizeof deriv[0]);
 
+    unsigned nt=OpenMP::getNumThreads();
     for (unsigned i=rank; i<size; i+=stride) {
       std::vector<double> deriv_i_x(numq);
       std::vector<double> deriv_i_y(numq);
@@ -457,35 +423,6 @@ void SANS::calculate_cpu(std::vector<Vector> &deriv)
     if(!serial) {
       comm.Sum(&deriv[0][0], 3*deriv.size());
     }
-
-    // do these splines actually interpolate the function??
-    // see how the spline curve looks
-    // std::ofstream points;
-    // std::ofstream interp;
-    // points.open("pontos.dat");
-    // interp.open("interpolado.dat");
-    // std::vector<double> curvex(100);
-    // std::vector<double> curvey(100);
-    // std::vector<double> curvez(100);
-    // std::vector<double> qs(100);
-    // double dq = (q_list[q_list.size()-1] - q_list[0])/100;
-    // for (unsigned i=0; i<100; i++) {
-    //   qs[i] = q_list[0] + i*dq;
-    //   curvex[i] = interpolation(deriv_coeffs_x[993], qs[i]);
-    //   curvey[i] = interpolation(deriv_coeffs_y[993], qs[i]);
-    //   curvez[i] = interpolation(deriv_coeffs_z[993], qs[i]);
-    // }
-    // // actual curves
-    // for (unsigned k=0; k < numq; k++) {
-    //   unsigned kdx = k*size;
-    //   points << q_list[k] << " " << deriv[kdx+993][0] << " " << deriv[kdx+993][1] << " " << deriv[kdx+993][2] << std::endl;
-    // }
-    // // interpolated
-    // for (unsigned i=0; i<qs.size(); i++) {
-    //   interp << qs[i] << " " << curvex[i] << " " << curvey[i] << " " << curvez[i] << std::endl;
-    // }
-    // points.close();
-    // interp.close();
 
     // compute the smeared spectra using the resolution function
     #pragma omp parallel for num_threads(nt)
