@@ -1,5 +1,5 @@
 /* +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-   Copyright (c) 2019-2022 The plumed team
+   Copyright (c) 2019-2023 The plumed team
    (see the PEOPLE file at the root of the distribution for a list of names)
 
    See http://www.plumed.org for more information.
@@ -327,7 +327,7 @@ void GenExample::printExampleInput( const std::vector<std::vector<std::string> >
               } else if( hyph!=std::string::npos ) {
                 ofile<<keys.getOutputComponentDescription(tname.substr(0,hyph))<<"  This is the "<<tname.substr(hyph+1)<<"th of these quantities";
               } else ofile<<keys.getOutputComponentDescription(tname);
-              ofile<<"</td></tr>";
+              ofile<<"</td></tr>"<<std::endl;
             }
             ofile<<"</table>"<<std::endl;
           }

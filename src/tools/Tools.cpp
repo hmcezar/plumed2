@@ -1,5 +1,5 @@
 /* +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-   Copyright (c) 2011-2022 The plumed team
+   Copyright (c) 2011-2023 The plumed team
    (see the PEOPLE file at the root of the distribution for a list of names)
 
    See http://www.plumed.org for more information.
@@ -269,13 +269,13 @@ bool Tools::getline(FILE* fp,std::string & line) {
 }
 
 void Tools::trim(std::string & s) {
-  size_t n=s.find_last_not_of(" \t");
-  s=s.substr(0,n+1);
+  auto n=s.find_last_not_of(" \t");
+  if(n!=std::string::npos) s.resize(n+1);
 }
 
 void Tools::trimComments(std::string & s) {
-  size_t n=s.find_first_of("#");
-  s=s.substr(0,n);
+  auto n=s.find_first_of("#");
+  if(n!=std::string::npos) s.resize(n);
 }
 
 bool Tools::caseInSensStringCompare(const std::string & str1, const std::string &str2)
@@ -450,6 +450,71 @@ Tools::DirectoryChanger::~DirectoryChanger() {
 std::unique_ptr<std::lock_guard<std::mutex>> Tools::molfile_lock() {
   static std::mutex mtx;
   return Tools::make_unique<std::lock_guard<std::mutex>>(mtx);
+}
+
+/// Internal tool, I am keeping it private for now
+namespace {
+
+class process_one_exception {
+  std::string & msg;
+  bool first=true;
+  void update() {
+    if(!first) msg+="\n\nThe above exception was the direct cause of the following exception:\n";
+    first=false;
+  }
+public:
+  process_one_exception(std::string & msg):
+    msg(msg)
+  {}
+  void operator()(const std::exception & e) {
+    update();
+    msg+=e.what();
+  }
+  void operator()(const std::string & e) {
+    update();
+    msg+=e;
+  }
+  void operator()(const char* e) {
+    update();
+    msg+=e;
+  }
+};
+
+template<class T>
+static void process_all_exceptions(T&& f) {
+  try {
+    // First throw the current exception
+    throw;
+  } catch(const std::nested_exception & e) {
+    // If nested, we go recursive
+    // notice that we apply function f only if exception is also a std::exception
+    try {
+      e.rethrow_nested();
+    } catch(...) {
+      process_all_exceptions(f);
+    }
+    auto d=dynamic_cast<const std::exception*>(&e);
+    if(d) f(*d);
+  } catch(const std::exception &e) {
+    // If not nested, we end recursion
+    f(e);
+  } catch(const std::string &e) {
+    // If not nested, we end recursion
+    f(e);
+  } catch(const char* e) {
+    // If not nested, we end recursion
+    f(e);
+  } catch(...) {
+    // If not nested and of unknown type, we stop the chain
+  }
+}
+
+}
+
+std::string Tools::concatenateExceptionMessages() {
+  std::string msg;
+  process_all_exceptions(process_one_exception(msg));
+  return msg;
 }
 
 }

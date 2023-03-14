@@ -21,6 +21,7 @@ jobs:
       matrix:
         variant:
         - -doc-mpi-
+        - -mpi-
         - -coverage-mpi-
         - -debug-
         - -debug-mpi-
@@ -80,8 +81,8 @@ jobs:
         # added by luigibonati
         mkdir -p $HOME/opt/
         cd $HOME/opt/ # GB: install in $HOME/opt/libtorch
-        wget --no-check-certificate https://download.pytorch.org/libtorch/lts/1.8/cpu/libtorch-cxx11-abi-shared-with-deps-1.8.2%2Bcpu.zip ;
-        unzip libtorch-cxx11-abi-shared-with-deps-1.8.2+cpu.zip ;
+        wget --no-check-certificate https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-1.13.1%2Bcpu.zip ;
+        unzip libtorch-cxx11-abi-shared-with-deps-1.13.1+cpu.zip ;
         echo "LIBRARY_PATH=$PWD/libtorch/lib:$LIBRARY_PATH" >> $GITHUB_ENV
         echo "LD_LIBRARY_PATH=$PWD/libtorch/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
         echo "CPATH=$PWD/libtorch/include/torch/csrc/api/include/:$PWD/libtorch/include/:$PWD/libtorch/include/torch:$CPATH" >> $GITHUB_ENV
@@ -144,6 +145,7 @@ jobs:
         make nmcheck
         ccache -s -M 100M
     - name: Run tests
+      if: ${{ ! contains( matrix.variant, '-doc-mpi-' ) }}
       run: |
          (while true; do  # see https://github.com/actions/virtual-environments/issues/1860
               df -h
@@ -186,7 +188,9 @@ jobs:
          echo "$HOME/opt/bin" >> $GITHUB_PATH
     - name: Install requirements
       run: |
-        .ci/install.cppcheck 2.7
+        .ci/install.cppcheck 2.10.2
+        # it is important that this is the same version used to generate the actual ./configure
+        .ci/install.autoconf 2.69
     - name: Build astyle
       run: |
         make -j 4 -C astyle
@@ -209,14 +213,14 @@ jobs:
       run: |
         make -C docker centos7
 
-  # We test on fedora36 to make sure we have compatibility with newer compilers (gcc 12)
-  fedora36:
+  # We test on fedora37 to make sure we have compatibility with newer compilers (gcc 12)
+  fedora37:
     runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@v3
     - name: Build and run tests
       run: |
-        make -C docker fedora36
+        make -C docker fedora37
 
   # We test on rockylinux8 as well
   rocky8:

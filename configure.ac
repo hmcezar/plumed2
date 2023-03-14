@@ -5,11 +5,15 @@
 # system.
 # If you modify configure.ac, remember to run
 # autoconf and then commit both files to the git repository.
+# Make sure that you are using the same autoconf version that is
+# installed on GitHub Actions see `.github/workflows/ci.yml`
+# and search for `autoconf`. Otherwise, our codecheck job
+# on GitHub Actions will complain.
 
 # we require a recent version
 # notice that autoconf is not necessary on user's machine, but only
 # if one has to update configure.ac
-AC_PREREQ([2.68])
+AC_PREREQ([2.69])
 AC_INIT([PLUMED], [2])
 
 ##################################################################
@@ -128,32 +132,55 @@ AC_DEFUN([PLUMED_CHECK_CXX_PACKAGE], [
     else
       testlibs=""
     fi
-    # check if multiple libraries are required
-    multiple=no
-    if test "$5" = "true"; then
-      multiple=yes
-    fi
     save_LIBS="$LIBS"
-    for testlib in "" $testlibs
-    do
-      if test -n "$testlib" ; then
-        AC_MSG_CHECKING([$1 with -l$testlib])
-        LIBS="-l$testlib $LIBS"
-      else
-        AC_MSG_CHECKING([$1 without extra libs])
-      fi
-      AC_LINK_IFELSE([AC_LANG_SOURCE([$2])],
+    
+    # check if multiple libraries are required simultaneously
+    multiple="no"
+    if test "$5" = "true"; then
+      multiple="yes"
+      all_LIBS=""
+      for testlib in $testlibs;
+      do
+        all_LIBS="$all_LIBS -l$testlib"
+      done
+      testlibs=" " # to check only without libraries, and later with all together
+    fi
+
+    # check without libraries
+    AC_MSG_CHECKING([$1 without extra libs])
+    AC_LINK_IFELSE([AC_LANG_SOURCE([$2])],
           [found=ok]
           [AC_MSG_RESULT([yes])],
           [AC_MSG_RESULT([no])]
       )
-      if test $found = ok ; then
-        break
+
+    if test "$found" = "ko" ; then
+      if test "$multiple" = "yes" ; then
+        AC_MSG_CHECKING([$1 with $all_LIBS])
+        LIBS="$all_LIBS $LIBS"
+        AC_LINK_IFELSE([AC_LANG_SOURCE([$2])],
+              [found=ok]
+              [AC_MSG_RESULT([yes])],
+              [AC_MSG_RESULT([no])]
+          )
+      else 
+        for testlib in $testlibs 
+        do
+          AC_MSG_CHECKING([$1 with -l$testlib])
+          LIBS="-l$testlib $LIBS"
+          AC_LINK_IFELSE([AC_LANG_SOURCE([$2])],
+                [found=ok]
+                [AC_MSG_RESULT([yes])],
+                [AC_MSG_RESULT([no])]
+          )
+          if test $found = ok ; then
+            break
+          fi
+          LIBS="$save_LIBS"
+        done
       fi
-      if test "$multiple" = "no"; then # reset LIBS to initial one, otherwise add new libraries
-        LIBS="$save_LIBS"
-      fi
-    done
+    fi
+
     if test $found = ok ; then
       AC_DEFINE([$3])
       $3=yes
@@ -880,9 +907,11 @@ fi
 
 if test "$af_ocl" = true ; then
   PLUMED_CHECK_PACKAGE([arrayfire.h],[af_is_double],[__PLUMED_HAS_ARRAYFIRE],[afopencl])
+  PLUMED_CHECK_PACKAGE([arrayfire.h],[af_is_double],[__PLUMED_HAS_ARRAYFIRE_OCL],[afopencl])
 fi
 if test "$af_cuda" = true ; then
   PLUMED_CHECK_PACKAGE([arrayfire.h],[af_is_double],[__PLUMED_HAS_ARRAYFIRE],[afcuda])
+  PLUMED_CHECK_PACKAGE([arrayfire.h],[af_is_double],[__PLUMED_HAS_ARRAYFIRE_CUDA],[afcuda])
 fi
 if test "$af_cpu" = true ; then
   PLUMED_CHECK_PACKAGE([arrayfire.h],[af_is_double],[__PLUMED_HAS_ARRAYFIRE],[afcpu])
