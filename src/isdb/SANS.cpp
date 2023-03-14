@@ -301,8 +301,11 @@ SANS::SANS(const ActionOptions&ao):
   if(atomistic) {
     log<<plumed.cite("Sears, Neutron News, 3, 26 (1992)");
   }
+  if(resolution) {
+    log<<plumed.cite("Pedersen, Posselt, Mortensen, J. Appl. Crystallogr., 23, 321 (1990)");
+  }
   log<<plumed.cite("Bonomi, Camilloni, Bioinformatics, 33, 3999 (2017)");
-  log<<"\n"; // TODO: add references for resolution function
+  log<<"\n";
 
   requestAtoms(atoms, false);
   if(getDoScore()) {
