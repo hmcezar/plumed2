@@ -1,5 +1,5 @@
 /* +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-   Copyright (c) 2011-2022 The plumed team
+   Copyright (c) 2011-2023 The plumed team
    (see the PEOPLE file at the root of the distribution for a list of names)
 
    See http://www.plumed.org for more information.
@@ -393,10 +393,12 @@ bool PDB::readFromFilepointer(FILE *fp,bool naturalUnits,double scale) {
 }
 
 bool PDB::read(const std::string&file,bool naturalUnits,double scale) {
-  FILE* fp=fopen(file.c_str(),"r");
+  FILE* fp=std::fopen(file.c_str(),"r");
   if(!fp) return false;
+// call fclose when exiting this function
+  auto deleter=[](FILE* f) { std::fclose(f); };
+  std::unique_ptr<FILE,decltype(deleter)> fp_deleter(fp,deleter);
   readFromFilepointer(fp,naturalUnits,scale);
-  fclose(fp);
   return true;
 }
 
@@ -534,9 +536,10 @@ bool PDB::checkForAtom( AtomNumber a ) const {
 }
 
 Log& operator<<(Log& ostr, const PDB&  pdb) {
-  char buffer[1000];
+  const std::size_t bufferlen=1000;
+  char buffer[bufferlen];
   for(unsigned i=0; i<pdb.positions.size(); i++) {
-    std::sprintf(buffer,"ATOM %3u %8.3f %8.3f %8.3f\n",pdb.numbers[i].serial(),pdb.positions[i][0],pdb.positions[i][1],pdb.positions[i][2]);
+    std::snprintf(buffer,bufferlen,"ATOM %3u %8.3f %8.3f %8.3f\n",pdb.numbers[i].serial(),pdb.positions[i][0],pdb.positions[i][1],pdb.positions[i][2]);
     ostr<<buffer;
   }
   return ostr;
