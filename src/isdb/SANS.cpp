@@ -32,11 +32,14 @@
 #include "core/GenericMolInfo.h"
 #include "tools/Communicator.h"
 #include "tools/Pbc.h"
+#include "tools/Tools.h"
+#include "tools/IFile.h"
 
 #include <map>
 #include <cmath>
 #include <iostream>
 #include <fstream>
+#include <string>
 
 #ifndef M_PI
 #define M_PI           3.14159265358979323846
@@ -105,7 +108,7 @@ PRINT ARG=(sans\.q-.*),(sans\.exp-.*) FILE=colvar STRIDE=1
 */
 //+ENDPLUMEDOC
 
-class SANS :
+class SANS2 :
   public MetainferenceBase
 {
 private:
@@ -139,14 +142,14 @@ private:
   void resolution_function(); 
 public:
   static void registerKeywords( Keywords& keys );
-  explicit SANS(const ActionOptions&);
+  explicit SANS2(const ActionOptions&);
   void calculate() override;
   void update() override;
 };
 
-PLUMED_REGISTER_ACTION(SANS,"SANS")
+PLUMED_REGISTER_ACTION(SANS2,"SANS2")
 
-void SANS::registerKeywords(Keywords& keys) {
+void SANS2::registerKeywords(Keywords& keys) {
   componentsAreNotOptional(keys);
   MetainferenceBase::registerKeywords(keys);
   keys.addFlag("NOPBC",false,"ignore the periodic boundary conditions when calculating distances");
@@ -156,6 +159,7 @@ void SANS::registerKeywords(Keywords& keys) {
   keys.add("atoms","ATOMS","The atoms to be included in the calculation, e.g. the whole protein.");
   keys.add("numbered","QVALUE","Selected scattering vector in Angstrom are given as QVALUE1, QVALUE2, ... .");
   keys.add("numbered","SCATLEN","Use SCATLEN keyword like SCATLEN1, SCATLEN2. These are the scattering lengths for the \\f$i\\f$th atom/bead.");
+  keys.add("optional","SCATLENFILE","Read the SCATLENs from a file.");
   keys.add("numbered","EXPINT","Add an experimental value for each q value.");
   keys.add("numbered","SIGMARES","Variance of Gaussian distribution describing the deviation in the scattering angle for each q value.");
   keys.add("compulsory","SCALEINT","1.0","SCALING value of the calculated data. Useful to simplify the comparison.");
@@ -164,7 +168,7 @@ void SANS::registerKeywords(Keywords& keys) {
   keys.addOutputComponent("exp","EXPINT","the # experimental intensity");
 }
 
-SANS::SANS(const ActionOptions&ao):
+SANS2::SANS2(const ActionOptions&ao):
   PLUMED_METAINF_INIT(ao),
   pbc(true),
   serial(false)
@@ -204,18 +208,38 @@ SANS::SANS(const ActionOptions&ao):
 
   if(martini&&atomistic) error("You cannot use MARTINI and ATOMISTIC at the same time");
 
+  SL_value.resize(size);
+
   // if MARTINI or unspecified, we need to read SCATLEN
   if(!atomistic) {
-    SL_value.resize(size);
-    ntarget=0;
-    for(unsigned i=0; i<size; ++i) {
-      if( !parseNumbered( "SCATLEN", i+1, SL_value[i]) ) break;
-      ntarget++;
+    // do we read from file?
+    std::string scatlenfile;
+    parse("SCATLENFILE",scatlenfile);
+    if (scatlenfile.length() != 0) {
+      IFile ifile;
+      ifile.open(scatlenfile);
+      std::string line;
+
+      ntarget=1;
+      while(ifile.getline(line)) {
+        std::string num; Tools::convert(ntarget,num);
+        std::vector<std::string> lineread{line};
+        if (!Tools::parse(lineread, "SCATLEN"+num, SL_value[ntarget-1], -1)) error("Missing SCATLEN or SCATLEN not sorted");
+        ntarget++;
+      }
+      if( (ntarget-1)!=size ) error("found wrong number of SCATLEN");            
     }
-    if( ntarget!=size ) error("found wrong number of SCATLEN");
+    // if not from a file, try to read from the input
+    else {
+      ntarget=0;
+      for(unsigned i=0; i<size; ++i) {
+        if( !parseNumbered( "SCATLEN", i+1, SL_value[i]) ) break;
+        ntarget++;
+      }
+      if( ntarget!=size ) error("found wrong number of SCATLEN");      
+    }
   // if atomistic the values are tabulated
   } else if(atomistic) {
-    SL_value.resize(size);
     tableASL(atoms, SL_value);
   }
 
@@ -316,7 +340,7 @@ SANS::SANS(const ActionOptions&ao):
   checkRead();
 }
 
-void SANS::calculate_cpu(std::vector<Vector> &deriv)
+void SANS2::calculate_cpu(std::vector<Vector> &deriv)
 {
   const unsigned size = getNumberOfAtoms();
   const unsigned numq = q_list.size();
@@ -446,7 +470,7 @@ void SANS::calculate_cpu(std::vector<Vector> &deriv)
   }
 }
 
-void SANS::calculate()
+void SANS2::calculate()
 {
   if(pbc) makeWhole();
 
@@ -484,13 +508,13 @@ void SANS::calculate()
   }
 }
 
-void SANS::update() {
+void SANS2::update() {
   // write status file
   if(getWstride()>0&& (getStep()%getWstride()==0 || getCPT()) ) writeStatus();
 }
 
 // compute resolution function
-void SANS::resolution_function()
+void SANS2::resolution_function()
 {
   int numq = q_list.size();
 
@@ -512,7 +536,7 @@ void SANS::resolution_function()
   }
 }
 
-inline double SANS::interpolation(std::vector<SplineCoeffs> &coeffs, double x)
+inline double SANS2::interpolation(std::vector<SplineCoeffs> &coeffs, double x)
 {
   unsigned s = 0;
   while ((x >= q_list[s+1]) && (s+1 < q_list.size()-1)) s++;
@@ -523,7 +547,7 @@ inline double SANS::interpolation(std::vector<SplineCoeffs> &coeffs, double x)
 
 // natural bc cubic spline implementation from the Wikipedia algorithm
 // modified from https://stackoverflow.com/a/19216702/3254658
-std::vector<SANS::SplineCoeffs> SANS::spline_coeffs(std::vector<double> &x, std::vector<double> &y)
+std::vector<SANS2::SplineCoeffs> SANS2::spline_coeffs(std::vector<double> &x, std::vector<double> &y)
 {
   unsigned n = x.size()-1;
   std::vector<double> a;
@@ -577,7 +601,7 @@ std::vector<SANS::SplineCoeffs> SANS::spline_coeffs(std::vector<double> &x, std:
 }
 
 
-void SANS::tableASL(const std::vector<AtomNumber> &atoms, std::vector<double> &SL_value)
+void SANS2::tableASL(const std::vector<AtomNumber> &atoms, std::vector<double> &SL_value)
 {
   std::map<std::string, unsigned> AA_map;
   AA_map["H"] = H;
